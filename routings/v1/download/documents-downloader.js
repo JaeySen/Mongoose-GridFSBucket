@@ -3,23 +3,20 @@ const logger = require('../../../config/logger.config');
 
 // Logic
 const mongoose = require("mongoose");
-const fs = require('fs');
-const Grid = require("gridfs-stream");
-const fileType = require('file-type');
+const fileType= require('file-type');
 
 //models
-const Files = require('../../../models/files.model');
+const File = require('../../../models/files.model');
 
 module.exports = router => {
     const conn = mongoose.connection;
-    Grid.mongo = mongoose.mongo;
     let gfs;
 
     conn.once("open", () => {
-        gfs = Grid(conn.db);
+        gfs = new mongoose.mongo.GridFSBucket(conn.db);
 
         router.get('/home', (req, res) => {
-            Files.find()
+            File.find()
                 .exec()
                 .then(files => {
                     let uploadedFiles = files.map(file => ({
@@ -43,29 +40,25 @@ module.exports = router => {
 
         router.get('/bucket/download', (req, res) => {
             let {
-                document_id
+                document_name
             } = req.query;
-            gfs.findOne({
-                _id: document_id
-            }, (err, file) => {
+            File.findOne({ name: document_name }).then((file) => {
                 if (!file) {
                     return res.status(404).send({
                         message: 'File was not found'
                     });
                 }
                 let data = [];
-                let readstream = gfs.createReadStream({
-                    filename: file.filename
-                });
+                let readstream = gfs.openDownloadStreamByName(document_name);
                 readstream.on('data', (chunk) => {
                     data.push(chunk);
                 });
-                readstream.on('end', () => {
+                readstream.on('end',  async () => {
                     data = Buffer.concat(data);
-                    let type = fileType(data);
+                    let type = await fileType.fromBuffer(data);
                     res.writeHead(200, {
                         'Content-Type': type.mime,
-                        'Content-disposition': 'attachment; filename=' + file.filename + '.' + type.ext,
+                        'Content-disposition': 'attachment; filename=' + file.name + '.' + type.ext,
                         'Content-Length': file.length
                     });
                     res.end(data);
@@ -77,7 +70,7 @@ module.exports = router => {
                         message: `Error, while downloading a file, with error:  ${err}`
                     });
                 });
-            });
+            })
         });
     });
 }
